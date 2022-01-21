@@ -1,0 +1,6 @@
+.vscode/
+.vs/
+
+*.o
+tex2dds
+tex2dds.exe
