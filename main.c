@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <assert.h>
 #include "dds.h"
 #include "tex.h"
 
@@ -20,15 +21,15 @@ void dds2tex(const char* dds_path)
     rewind(dds_file);
 
     char magic[4];
-    fread(magic, 1, 4, dds_file);
-    if (file_size < sizeof(DDS_HEADER) + 4 || memcmp(magic, dds_magic, 4) != 0) {
+    if (fread(magic, 1, 4, dds_file) != 4
+     || file_size < sizeof(DDS_HEADER) + 4 || memcmp(magic, dds_magic, 4) != 0) {
         fprintf(stderr, "Error: Not a valid dds file!\n");
         fclose(dds_file);
         return;
     }
 
     DDS_HEADER dds_header;
-    fread(&dds_header, sizeof(DDS_HEADER), 1, dds_file);
+    assert(fread(&dds_header, sizeof(DDS_HEADER), 1, dds_file) == 1);
 
     const uint8_t* tex_format;
     if (memcmp(dds_header.ddspf.dwFourCC, "DXT1", 4) == 0) {
@@ -62,7 +63,7 @@ void dds2tex(const char* dds_path)
 
     // the raw dds image data
     uint8_t* data_buffer = malloc(file_size - sizeof(DDS_HEADER) - 4);
-    fread(data_buffer, 1, file_size - sizeof(DDS_HEADER) - 4, dds_file);
+    assert(fread(data_buffer, 1, file_size - sizeof(DDS_HEADER) - 4, dds_file) == file_size - sizeof(DDS_HEADER) - 4);
     fwrite(data_buffer, 1, file_size - sizeof(DDS_HEADER) - 4, tex_file);
     free(data_buffer);
 
@@ -83,14 +84,14 @@ void tex2dds(const char* tex_path)
     rewind(tex_file);
 
     TEX_HEADER tex_header;
-    fread(tex_header.magic, 1, 4, tex_file);
-    if (file_size < sizeof(TEX_HEADER) || memcmp(tex_header.magic, tex_magic, 4) != 0) {
+    if (fread(tex_header.magic, 1, 4, tex_file) != 4
+     || file_size < sizeof(TEX_HEADER) || memcmp(tex_header.magic, tex_magic, 4) != 0) {
         fprintf(stderr, "Error: Not a valid tex file!\n");
         fclose(tex_file);
         return;
     }
 
-    fread((uint8_t*) &tex_header + 4, sizeof(TEX_HEADER) - 4, 1, tex_file);
+    assert(fread((uint8_t*) &tex_header + 4, sizeof(TEX_HEADER) - 4, 1, tex_file) == 1);
 
     const char* dds_format;
     if (memcmp(tex_header.tex_format, tex_dxt1_format, 4) == 0) {
@@ -132,7 +133,7 @@ void tex2dds(const char* tex_path)
 
     // the raw dds image data
     uint8_t* data_buffer = malloc(file_size - sizeof(TEX_HEADER));
-    fread(data_buffer, 1, file_size - sizeof(TEX_HEADER), tex_file);
+    assert(fread(data_buffer, 1, file_size - sizeof(TEX_HEADER), tex_file) == file_size - sizeof(TEX_HEADER));
     fwrite(data_buffer, 1, file_size - sizeof(TEX_HEADER), dds_file);
     free(data_buffer);
 
