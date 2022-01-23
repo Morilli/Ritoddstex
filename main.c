@@ -51,7 +51,7 @@ void dds2tex(const char* dds_path)
         fclose(dds_file);
         return;
     }
-    if (dds_header.dwMipMapCount > 0) {
+    if (dds_header.dwMipMapCount > 1) { // this value may be set to 1, which is equivalent to leaving it at 0 (no mipmaps)
         if (dds_header.dwMipMapCount != 32u - __builtin_clz(max(dds_header.dwWidth, dds_header.dwHeight))) {
             fprintf(stderr, "Error: DDS mipmap count mismatch; expected %u mipmaps, got %u\n", 32 - __builtin_clz(max(dds_header.dwWidth, dds_header.dwHeight)), dds_header.dwMipMapCount);
             fclose(dds_file);
@@ -74,7 +74,7 @@ void dds2tex(const char* dds_path)
         .magic = tex_magic,
         .image_width = dds_header.dwWidth,
         .image_height = dds_header.dwHeight,
-        .has_mipmaps = dds_header.dwMipMapCount
+        .has_mipmaps = dds_header.dwMipMapCount > 1
     };
     memcpy(tex_header.tex_format, tex_format, 2);
     fwrite(&tex_header, sizeof(TEX_HEADER), 1, tex_file);
