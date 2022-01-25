@@ -41,17 +41,23 @@ void dds2tex(const char* dds_path)
     DDS_HEADER dds_header;
     assert(fread(&dds_header, sizeof(DDS_HEADER), 1, dds_file) == 1);
 
-    const uint8_t* tex_format;
+    TEX_HEADER tex_header = {
+        .magic = tex_magic,
+        .image_width = dds_header.dwWidth,
+        .image_height = dds_header.dwHeight,
+        .unk1 = 1 // this is always set to 1 in original tex files; no idea what it stands for
+    };
     if (memcmp(dds_header.ddspf.dwFourCC, "DXT1", 4) == 0) {
-        tex_format = tex_dxt1_format;
+        tex_header.tex_format = tex_format_dxt1;
     } else if (memcmp(dds_header.ddspf.dwFourCC, "DXT5", 4) == 0) {
-        tex_format = tex_dxt5_format;
+        tex_header.tex_format = tex_format_dxt5;
     } else {
         fprintf(stderr, "Error: dds file needs to be in either DXT1 or DXT5 format!\n");
         fclose(dds_file);
         return;
     }
     if (dds_header.dwMipMapCount > 1) { // this value may be set to 1, which is equivalent to leaving it at 0 (no mipmaps)
+        tex_header.has_mipmaps = true;
         if (dds_header.dwMipMapCount != 32u - __builtin_clz(max(dds_header.dwWidth, dds_header.dwHeight))) {
             fprintf(stderr, "Error: DDS mipmap count mismatch; expected %u mipmaps, got %u\n", 32 - __builtin_clz(max(dds_header.dwWidth, dds_header.dwHeight)), dds_header.dwMipMapCount);
             fclose(dds_file);
@@ -70,13 +76,6 @@ void dds2tex(const char* dds_path)
         fclose(dds_file);
         return;
     }
-    TEX_HEADER tex_header = {
-        .magic = tex_magic,
-        .image_width = dds_header.dwWidth,
-        .image_height = dds_header.dwHeight,
-        .has_mipmaps = dds_header.dwMipMapCount > 1
-    };
-    memcpy(tex_header.tex_format, tex_format, 2);
     fwrite(&tex_header, sizeof(TEX_HEADER), 1, tex_file);
 
     printf("Info: Converting %ux%u DDS file \"%s\" to TEX file \"%s\".\n", tex_header.image_width, tex_header.image_height, dds_path, tex_path);
@@ -131,9 +130,9 @@ void tex2dds(const char* tex_path)
     assert(fread((uint8_t*) &tex_header + 4, sizeof(TEX_HEADER) - 4, 1, tex_file) == 1);
 
     const char* dds_format;
-    if (memcmp(tex_header.tex_format, tex_dxt1_format, 2) == 0) {
+    if (tex_header.tex_format == tex_format_dxt1) {
         dds_format = "DXT1";
-    } else if (memcmp(tex_header.tex_format, tex_dxt5_format, 2) == 0) {
+    } else if (tex_header.tex_format == tex_format_dxt5) {
         dds_format = "DXT5";
     } else {
         fprintf(stderr, "Error: tex file needs to be in either DXT1 or DXT5 format!\n");
