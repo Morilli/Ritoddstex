@@ -51,8 +51,20 @@ void dds2tex(const char* dds_path)
         tex_header.tex_format = tex_format_dxt1;
     } else if (memcmp(dds_header.ddspf.dwFourCC, "DXT5", 4) == 0) {
         tex_header.tex_format = tex_format_dxt5;
+    } else if ((dds_header.ddspf.dwFlags & DDS_RGBA) == DDS_RGBA) {
+        // sanity checks; probably not strictly necessary but I don't wanna handle anything else
+        if (dds_header.ddspf.dwRGBBitCount != 32
+         || dds_header.ddspf.dwRBitMask != 0x000000ff
+         || dds_header.ddspf.dwGBitMask != 0x0000ff00
+         || dds_header.ddspf.dwBBitMask != 0x00ff0000
+         || dds_header.ddspf.dwABitMask != 0xff000000) {
+            fprintf(stderr, "Error: The File is not in exact RGBA8 format.\n");
+            fclose(dds_file);
+            return;
+        }
+        tex_header.tex_format = tex_format_rgba8;
     } else {
-        fprintf(stderr, "Error: dds file needs to be in either DXT1 or DXT5 format!\n");
+        fprintf(stderr, "Error: dds file needs to be in either DXT1, DXT5 or uncompressed RGBA8 format!\n");
         fclose(dds_file);
         return;
     }
@@ -86,10 +98,12 @@ void dds2tex(const char* dds_path)
     if (tex_header.has_mipmaps) {
         int32_t current_offset = file_size - sizeof(DDS_HEADER) - 4;
         printf("Writing %u mipmaps to TEX file...\n", dds_header.dwMipMapCount);
+        const int minimum_dimension = tex_header.tex_format == tex_format_rgba8 ? 1 : 4;
         for (int32_t i = dds_header.dwMipMapCount-1; i >= 0; i--) {
-            uint32_t current_image_width = max(tex_header.image_width / (1 << i), 4); // minimum dimension per side is 4 pixels
-            uint32_t current_image_height = max(tex_header.image_height / (1 << i), 4); // minimum dimension per side is 4 pixels
+            uint32_t current_image_width = max(tex_header.image_width / (1 << i), minimum_dimension);
+            uint32_t current_image_height = max(tex_header.image_height / (1 << i), minimum_dimension);
             uint32_t current_image_size = current_image_width * current_image_height;
+            if (tex_header.tex_format == tex_format_rgba8) current_image_size *= 4; // 4 byte per pixel in RGBA8
             current_offset -= current_image_size;
             printf("Writing mipmap %u with size %ux%u\n", i, current_image_width, current_image_height);
             if (current_offset < 0) {
@@ -129,16 +143,27 @@ void tex2dds(const char* tex_path)
 
     assert(fread((uint8_t*) &tex_header + 4, sizeof(TEX_HEADER) - 4, 1, tex_file) == 1);
 
+    DDS_PIXELFORMAT ddspf = {.dwSize = sizeof(DDS_PIXELFORMAT)};
     const char* dds_format;
-    if (tex_header.tex_format == tex_format_dxt1) {
-        dds_format = "DXT1";
-    } else if (tex_header.tex_format == tex_format_dxt5) {
-        dds_format = "DXT5";
-    } else {
-        fprintf(stderr, "Error: tex file needs to be in either DXT1 or DXT5 format!\n");
-        fclose(tex_file);
-        return;
+    switch (tex_header.tex_format)
+    {
+        case tex_format_dxt1: dds_format = "DXT1"; ddspf.dwFlags = DDS_FOURCC; break;
+        case tex_format_dxt5: dds_format = "DXT5"; ddspf.dwFlags = DDS_FOURCC; break;
+        case tex_format_rgba8:
+            dds_format = "\0\0\0"; // no format, just uncompressed RGBA8
+            ddspf.dwFlags = DDS_RGBA;
+            ddspf.dwRGBBitCount = 8 * 4;
+            ddspf.dwRBitMask = 0x000000ff;
+            ddspf.dwGBitMask = 0x0000ff00;
+            ddspf.dwBBitMask = 0x00ff0000;
+            ddspf.dwABitMask = 0xff000000;
+            break;
+        default:
+            fprintf(stderr, "Error: tex file needs to be in either DXT1, DXT5 or RGBA8 format!\n");
+            fclose(tex_file);
+            return;
     }
+    memcpy(ddspf.dwFourCC, dds_format, 4);
 
     char dds_path[input_path_length];
     memcpy(dds_path, tex_path, input_path_length);
@@ -151,14 +176,10 @@ void tex2dds(const char* tex_path)
     }
     DDS_HEADER dds_header = {
         .dwSize = sizeof(DDS_HEADER),
-        .dwFlags = DDS_HEADER_FLAGS_TEXTURE | DDS_HEADER_FLAGS_LINEARSIZE,
+        .dwFlags = DDS_HEADER_FLAGS_TEXTURE,
         .dwHeight = tex_header.image_height,
         .dwWidth = tex_header.image_width,
-        .dwPitchOrLinearSize = tex_header.image_width * tex_header.image_height,
-        .ddspf = {
-            .dwSize = sizeof(DDS_PIXELFORMAT),
-            .dwFlags = DDS_FOURCC
-        },
+        .ddspf = ddspf,
         .dwCaps = DDS_SURFACE_FLAGS_TEXTURE
     };
     if (tex_header.has_mipmaps) {
@@ -167,7 +188,6 @@ void tex2dds(const char* tex_path)
         dds_header.dwCaps |= DDS_SURFACE_FLAGS_MIPMAP;
         dds_header.dwMipMapCount = 32 - __builtin_clz(max(tex_header.image_width, tex_header.image_height));
     }
-    memcpy(dds_header.ddspf.dwFourCC, dds_format, 4);
     fwrite(dds_magic, 1, 4, dds_file);
     fwrite(&dds_header, sizeof(DDS_HEADER), 1, dds_file);
 
@@ -179,10 +199,12 @@ void tex2dds(const char* tex_path)
     if (tex_header.has_mipmaps) {
         int32_t current_offset = file_size - sizeof(TEX_HEADER);
         printf("Writing %u mipmaps to DDS file...\n", dds_header.dwMipMapCount);
+        const int minimum_dimension = tex_header.tex_format == tex_format_rgba8 ? 1 : 4;
         for (uint32_t i = 0; i < dds_header.dwMipMapCount; i++) {
-            uint32_t current_image_width = max(tex_header.image_width / (1 << i), 4); // minimum dimension per side is 4 pixels
-            uint32_t current_image_height = max(tex_header.image_height / (1 << i), 4); // minimum dimension per side is 4 pixels
+            uint32_t current_image_width = max(tex_header.image_width / (1 << i), minimum_dimension);
+            uint32_t current_image_height = max(tex_header.image_height / (1 << i), minimum_dimension);
             uint32_t current_image_size = current_image_width * current_image_height;
+            if (tex_header.tex_format == tex_format_rgba8) current_image_size *= 4; // 4 byte per pixel in RGBA8
             printf("Writing mipmap %u with size %ux%u\n", i, current_image_width, current_image_height);
             current_offset -= current_image_size;
             if (current_offset < 0) {

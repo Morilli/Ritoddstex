@@ -2,11 +2,12 @@
 #include <stdbool.h>
 
 enum tex_format {
-    tex_format_d32 = 0x1,
-    tex_format_d24s8 = 0x2,
-    tex_foramt_d24x8 = 0x3,
+    tex_format_etc1 = 0x1,
+    tex_format_etc2_eac = 0x2,
+    tex_format_etc2 = 0x3,
     tex_format_dxt1 = 0xA,
-    tex_format_dxt5 = 0xC
+    tex_format_dxt5 = 0xC,
+    tex_format_rgba8 = 0x14
 };
 #define tex_magic "TEX"
 
