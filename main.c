@@ -17,6 +17,30 @@ int input_path_length;
     _a > _b ? _a : _b; \
 })
 
+int get_bytes_per_block(uint8_t format)
+{
+    switch (format)
+    {
+        case tex_format_dxt1: return 8;
+        case tex_format_dxt5: return 16;
+        case tex_format_rgba8: return 1;
+    }
+    __builtin_unreachable();
+}
+
+int get_block_size(uint8_t format)
+{
+    switch (format)
+    {
+        case tex_format_dxt1:
+        case tex_format_dxt5:
+            return 4;
+        case tex_format_rgba8:
+            return 1;
+    }
+    __builtin_unreachable();
+}
+
 
 void dds2tex(const char* dds_path)
 {
@@ -98,14 +122,14 @@ void dds2tex(const char* dds_path)
     if (tex_header.has_mipmaps) {
         int32_t current_offset = file_size - sizeof(DDS_HEADER) - 4;
         printf("Writing %u mipmaps to TEX file...\n", dds_header.dwMipMapCount);
-        const int minimum_dimension = tex_header.tex_format == tex_format_rgba8 ? 1 : 4;
+        const uint32_t block_size = get_block_size(tex_header.tex_format);
+        const uint32_t bytes_per_block = get_bytes_per_block(tex_header.tex_format);
         for (int32_t i = dds_header.dwMipMapCount-1; i >= 0; i--) {
-            uint32_t current_image_width = max(tex_header.image_width / (1 << i), minimum_dimension);
-            uint32_t current_image_height = max(tex_header.image_height / (1 << i), minimum_dimension);
-            uint32_t current_image_size = current_image_width * current_image_height;
-            if (tex_header.tex_format == tex_format_rgba8) current_image_size *= 4; // 4 byte per pixel in RGBA8
-            current_offset -= current_image_size;
+            uint32_t current_image_width = max(tex_header.image_width / (1 << i), 1);
+            uint32_t current_image_height = max(tex_header.image_height / (1 << i), 1);
+            uint32_t current_image_size = max(bytes_per_block * current_image_width * current_image_height / (block_size * block_size), bytes_per_block);
             printf("Writing mipmap %u with size %ux%u\n", i, current_image_width, current_image_height);
+            current_offset -= current_image_size;
             if (current_offset < 0) {
                 fprintf(stderr, "Error when attempting to write mipmap %u: Not enough data to read mipmap!\n", i);
                 break;
@@ -199,12 +223,12 @@ void tex2dds(const char* tex_path)
     if (tex_header.has_mipmaps) {
         int32_t current_offset = file_size - sizeof(TEX_HEADER);
         printf("Writing %u mipmaps to DDS file...\n", dds_header.dwMipMapCount);
-        const int minimum_dimension = tex_header.tex_format == tex_format_rgba8 ? 1 : 4;
+        const uint32_t block_size = get_block_size(tex_header.tex_format);
+        const uint32_t bytes_per_block = get_bytes_per_block(tex_header.tex_format);
         for (uint32_t i = 0; i < dds_header.dwMipMapCount; i++) {
-            uint32_t current_image_width = max(tex_header.image_width / (1 << i), minimum_dimension);
-            uint32_t current_image_height = max(tex_header.image_height / (1 << i), minimum_dimension);
-            uint32_t current_image_size = current_image_width * current_image_height;
-            if (tex_header.tex_format == tex_format_rgba8) current_image_size *= 4; // 4 byte per pixel in RGBA8
+            uint32_t current_image_width = max(tex_header.image_width / (1 << i), 1);
+            uint32_t current_image_height = max(tex_header.image_height / (1 << i), 1);
+            uint32_t current_image_size = max(bytes_per_block * current_image_width * current_image_height / (block_size * block_size), bytes_per_block);
             printf("Writing mipmap %u with size %ux%u\n", i, current_image_width, current_image_height);
             current_offset -= current_image_size;
             if (current_offset < 0) {
