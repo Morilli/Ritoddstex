@@ -23,7 +23,7 @@ int get_bytes_per_block(uint8_t format)
     {
         case tex_format_dxt1: return 8;
         case tex_format_dxt5: return 16;
-        case tex_format_rgba8: return 1;
+        case tex_format_rgba8: return 4;
     }
     __builtin_unreachable();
 }
