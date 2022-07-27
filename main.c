@@ -127,7 +127,9 @@ void dds2tex(const char* dds_path)
         for (int32_t i = dds_header.dwMipMapCount-1; i >= 0; i--) {
             uint32_t current_image_width = max(tex_header.image_width / (1 << i), 1);
             uint32_t current_image_height = max(tex_header.image_height / (1 << i), 1);
-            uint32_t current_image_size = max(bytes_per_block * current_image_width * current_image_height / (block_size * block_size), bytes_per_block);
+            uint32_t block_width = (current_image_width + block_size - 1) / block_size;
+            uint32_t block_height = (current_image_height + block_size - 1) / block_size;
+            uint32_t current_image_size = bytes_per_block * block_width * block_height;
             printf("Writing mipmap %u with size %ux%u\n", i, current_image_width, current_image_height);
             current_offset -= current_image_size;
             if (current_offset < 0) {
@@ -228,7 +230,9 @@ void tex2dds(const char* tex_path)
         for (uint32_t i = 0; i < dds_header.dwMipMapCount; i++) {
             uint32_t current_image_width = max(tex_header.image_width / (1 << i), 1);
             uint32_t current_image_height = max(tex_header.image_height / (1 << i), 1);
-            uint32_t current_image_size = max(bytes_per_block * current_image_width * current_image_height / (block_size * block_size), bytes_per_block);
+            uint32_t block_width = (current_image_width + block_size - 1) / block_size;
+            uint32_t block_height = (current_image_height + block_size - 1) / block_size;
+            uint32_t current_image_size = bytes_per_block * block_width * block_height;
             printf("Writing mipmap %u with size %ux%u\n", i, current_image_width, current_image_height);
             current_offset -= current_image_size;
             if (current_offset < 0) {
