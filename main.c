@@ -23,7 +23,7 @@ int get_bytes_per_block(uint8_t format)
     {
         case tex_format_dxt1: return 8;
         case tex_format_dxt5: return 16;
-        case tex_format_rgba8: return 4;
+        case tex_format_bgra8: return 4;
     }
     __builtin_unreachable();
 }
@@ -35,10 +35,44 @@ int get_block_size(uint8_t format)
         case tex_format_dxt1:
         case tex_format_dxt5:
             return 4;
-        case tex_format_rgba8:
+        case tex_format_bgra8:
             return 1;
     }
     __builtin_unreachable();
+}
+
+int mask_to_index(uint32_t mask)
+{
+    switch (mask)
+    {
+        case 0x000000ff: return 0;
+        case 0x0000ff00: return 1;
+        case 0x00ff0000: return 2;
+        case 0xff000000: return 3;
+    }
+
+    return -1;
+}
+
+// swaps RGBA pixel data with arbitrary R, G, B and A ordering to BGRA format.
+// The order must be specified in the rgba_indices parameter, for example for
+// ARGB: rgba_indices = {3, 0, 1, 2}
+void swap_to_bgra(uint8_t* data, uint32_t length, const int rgba_indices[4])
+{
+    const int r_index = rgba_indices[0];
+    const int g_index = rgba_indices[1];
+    const int b_index = rgba_indices[2];
+    const int a_index = rgba_indices[3];
+
+    for (uint32_t i = 0; i < length; i += 4) {
+        uint32_t current_pixel_data = 0;
+        current_pixel_data |= data[i + b_index] << 0;
+        current_pixel_data |= data[i + g_index] << 8;
+        current_pixel_data |= data[i + r_index] << 16;
+        current_pixel_data |= data[i + a_index] << 24;
+
+        memcpy(data + i, &current_pixel_data, 4);
+    }
 }
 
 
@@ -71,24 +105,42 @@ bool dds2tex(const char* dds_path)
         .image_height = dds_header.dwHeight,
         .unk1 = 1 // this is always set to 1 in original tex files; no idea what it stands for
     };
+    bool custom_rgba_format = false;
+    int rgba_indices[4];
+
     if (memcmp(dds_header.ddspf.dwFourCC, "DXT1", 4) == 0) {
         tex_header.tex_format = tex_format_dxt1;
     } else if (memcmp(dds_header.ddspf.dwFourCC, "DXT5", 4) == 0) {
         tex_header.tex_format = tex_format_dxt5;
     } else if ((dds_header.ddspf.dwFlags & DDS_RGBA) == DDS_RGBA) {
-        // sanity checks; probably not strictly necessary but I don't wanna handle anything else
-        if (dds_header.ddspf.dwRGBBitCount != 32
-         || dds_header.ddspf.dwRBitMask != 0x000000ff
-         || dds_header.ddspf.dwGBitMask != 0x0000ff00
-         || dds_header.ddspf.dwBBitMask != 0x00ff0000
-         || dds_header.ddspf.dwABitMask != 0xff000000) {
-            fprintf(stderr, "Error: The File is not in exact RGBA8 format.\n");
+        tex_header.tex_format = tex_format_bgra8;
+
+        // do some sanity checks to ensure dds data is in / can be converted to BGRA8 format
+        if (dds_header.ddspf.dwRGBBitCount != 32) {
+            fprintf(stderr, "Error: RGBBitCount is %u, expected 32.\n", dds_header.ddspf.dwRGBBitCount);
             fclose(dds_file);
             return false;
         }
-        tex_header.tex_format = tex_format_rgba8;
+
+        if (dds_header.ddspf.dwBBitMask != 0x000000ff
+         || dds_header.ddspf.dwGBitMask != 0x0000ff00
+         || dds_header.ddspf.dwRBitMask != 0x00ff0000
+         || dds_header.ddspf.dwABitMask != 0xff000000) {
+            custom_rgba_format = true;
+            rgba_indices[0] = mask_to_index(dds_header.ddspf.dwRBitMask);
+            rgba_indices[1] = mask_to_index(dds_header.ddspf.dwGBitMask);
+            rgba_indices[2] = mask_to_index(dds_header.ddspf.dwBBitMask);
+            rgba_indices[3] = mask_to_index(dds_header.ddspf.dwABitMask);
+            for (int i = 0; i < 4; i++) {
+                if (rgba_indices[i] == -1) {
+                    fprintf(stderr, "Error: bitmask data invalid. Can't convert to BGRA output format.\n");
+                    fclose(dds_file);
+                    return false;
+                }
+            }
+        }
     } else {
-        fprintf(stderr, "Error: dds file needs to be in either DXT1, DXT5 or uncompressed RGBA8 format!\n");
+        fprintf(stderr, "Error: dds file needs to be in either DXT1, DXT5 or uncompressed BGRA8 format!\n");
         fclose(dds_file);
         return false;
     }
@@ -120,6 +172,10 @@ bool dds2tex(const char* dds_path)
     uint32_t buffer_size = file_size - sizeof(DDS_HEADER) - 4;
     uint8_t* data_buffer = malloc(buffer_size);
     assert(fread(data_buffer, 1, buffer_size, dds_file) == buffer_size);
+    if (custom_rgba_format) {
+        assert(buffer_size % 4 == 0);
+        swap_to_bgra(data_buffer, buffer_size, rgba_indices);
+    }
 
     bool success = true;
     if (tex_header.has_mipmaps) {
@@ -181,17 +237,17 @@ bool tex2dds(const char* tex_path)
     {
         case tex_format_dxt1: dds_format = "DXT1"; ddspf.dwFlags = DDS_FOURCC; break;
         case tex_format_dxt5: dds_format = "DXT5"; ddspf.dwFlags = DDS_FOURCC; break;
-        case tex_format_rgba8:
-            dds_format = "\0\0\0"; // no format, just uncompressed RGBA8
+        case tex_format_bgra8:
+            dds_format = "\0\0\0"; // no format, just uncompressed BGRA8
             ddspf.dwFlags = DDS_RGBA;
             ddspf.dwRGBBitCount = 8 * 4;
-            ddspf.dwRBitMask = 0x000000ff;
+            ddspf.dwBBitMask = 0x000000ff;
             ddspf.dwGBitMask = 0x0000ff00;
-            ddspf.dwBBitMask = 0x00ff0000;
+            ddspf.dwRBitMask = 0x00ff0000;
             ddspf.dwABitMask = 0xff000000;
             break;
         default:
-            fprintf(stderr, "Error: tex file needs to be in either DXT1, DXT5 or RGBA8 format!\n");
+            fprintf(stderr, "Error: tex file needs to be in either DXT1, DXT5 or BGRA8 format!\n");
             fclose(tex_file);
             return false;
     }
