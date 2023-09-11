@@ -42,12 +42,12 @@ int get_block_size(uint8_t format)
 }
 
 
-void dds2tex(const char* dds_path)
+bool dds2tex(const char* dds_path)
 {
     FILE* dds_file = fopen(dds_path, "rb");
     if (!dds_file) {
         fprintf(stderr, "Error: Failed to open input dds file \"%s\"\n", dds_path);
-        return;
+        return false;
     }
 
     fseek(dds_file, 0, SEEK_END);
@@ -59,7 +59,7 @@ void dds2tex(const char* dds_path)
      || file_size < sizeof(DDS_HEADER) + 4 || memcmp(magic, dds_magic, 4) != 0) {
         fprintf(stderr, "Error: Not a valid dds file!\n");
         fclose(dds_file);
-        return;
+        return false;
     }
 
     DDS_HEADER dds_header;
@@ -84,20 +84,20 @@ void dds2tex(const char* dds_path)
          || dds_header.ddspf.dwABitMask != 0xff000000) {
             fprintf(stderr, "Error: The File is not in exact RGBA8 format.\n");
             fclose(dds_file);
-            return;
+            return false;
         }
         tex_header.tex_format = tex_format_rgba8;
     } else {
         fprintf(stderr, "Error: dds file needs to be in either DXT1, DXT5 or uncompressed RGBA8 format!\n");
         fclose(dds_file);
-        return;
+        return false;
     }
     if (dds_header.dwMipMapCount > 1) { // this value may be set to 1, which is equivalent to leaving it at 0 (no mipmaps)
         tex_header.has_mipmaps = true;
         if (dds_header.dwMipMapCount != 32u - __builtin_clz(max(dds_header.dwWidth, dds_header.dwHeight))) {
             fprintf(stderr, "Error: DDS mipmap count mismatch; expected %u mipmaps, got %u\n", 32 - __builtin_clz(max(dds_header.dwWidth, dds_header.dwHeight)), dds_header.dwMipMapCount);
             fclose(dds_file);
-            return;
+            return false;
         } else {
             printf("Info: DDS file has mipmaps\n");
         }
@@ -110,23 +110,26 @@ void dds2tex(const char* dds_path)
     if (!tex_file) {
         fprintf(stderr, "Error: Failed to open output tex file \"%s\"\n", tex_path);
         fclose(dds_file);
-        return;
+        return false;
     }
     fwrite(&tex_header, sizeof(TEX_HEADER), 1, tex_file);
 
     printf("Info: Converting %ux%u DDS file \"%s\" to TEX file \"%s\".\n", tex_header.image_width, tex_header.image_height, dds_path, tex_path);
 
     // the raw dds image data
-    uint8_t* data_buffer = malloc(file_size - sizeof(DDS_HEADER) - 4);
-    assert(fread(data_buffer, 1, file_size - sizeof(DDS_HEADER) - 4, dds_file) == file_size - sizeof(DDS_HEADER) - 4);
+    uint32_t buffer_size = file_size - sizeof(DDS_HEADER) - 4;
+    uint8_t* data_buffer = malloc(buffer_size);
+    assert(fread(data_buffer, 1, buffer_size, dds_file) == buffer_size);
+
+    bool success = true;
     if (tex_header.has_mipmaps) {
-        int32_t current_offset = file_size - sizeof(DDS_HEADER) - 4;
+        int32_t current_offset = buffer_size;
         printf("Writing %u mipmaps to TEX file...\n", dds_header.dwMipMapCount);
         const uint32_t block_size = get_block_size(tex_header.tex_format);
         const uint32_t bytes_per_block = get_bytes_per_block(tex_header.tex_format);
         for (int32_t i = dds_header.dwMipMapCount-1; i >= 0; i--) {
-            uint32_t current_image_width = max(tex_header.image_width / (1 << i), 1);
-            uint32_t current_image_height = max(tex_header.image_height / (1 << i), 1);
+            uint32_t current_image_width = max(tex_header.image_width >> i, 1);
+            uint32_t current_image_height = max(tex_header.image_height >> i, 1);
             uint32_t block_width = (current_image_width + block_size - 1) / block_size;
             uint32_t block_height = (current_image_height + block_size - 1) / block_size;
             uint32_t current_image_size = bytes_per_block * block_width * block_height;
@@ -134,25 +137,28 @@ void dds2tex(const char* dds_path)
             current_offset -= current_image_size;
             if (current_offset < 0) {
                 fprintf(stderr, "Error when attempting to write mipmap %u: Not enough data to read mipmap!\n", i);
+                success = false;
                 break;
             }
             fwrite(data_buffer + current_offset, 1, current_image_size, tex_file);
         }
     } else {
-        fwrite(data_buffer, 1, file_size - sizeof(DDS_HEADER) - 4, tex_file);
+        fwrite(data_buffer, 1, buffer_size, tex_file);
     }
     free(data_buffer);
 
     fclose(dds_file);
     fclose(tex_file);
+
+    return success;
 }
 
-void tex2dds(const char* tex_path)
+bool tex2dds(const char* tex_path)
 {
     FILE* tex_file = fopen(tex_path, "rb");
     if (!tex_file) {
         fprintf(stderr, "Error: Failed to open input tex file \"%s\"\n", tex_path);
-        return;
+        return false;
     }
 
     fseek(tex_file, 0, SEEK_END);
@@ -164,7 +170,7 @@ void tex2dds(const char* tex_path)
      || file_size < sizeof(TEX_HEADER) || memcmp(tex_header.magic, tex_magic, 4) != 0) {
         fprintf(stderr, "Error: Not a valid tex file!\n");
         fclose(tex_file);
-        return;
+        return false;
     }
 
     assert(fread((uint8_t*) &tex_header + 4, sizeof(TEX_HEADER) - 4, 1, tex_file) == 1);
@@ -187,7 +193,7 @@ void tex2dds(const char* tex_path)
         default:
             fprintf(stderr, "Error: tex file needs to be in either DXT1, DXT5 or RGBA8 format!\n");
             fclose(tex_file);
-            return;
+            return false;
     }
     memcpy(ddspf.dwFourCC, dds_format, 4);
 
@@ -198,7 +204,7 @@ void tex2dds(const char* tex_path)
     if (!dds_file) {
         fprintf(stderr, "Error: Failed to open output dds file \"%s\"\n", dds_path);
         fclose(tex_file);
-        return;
+        return false;
     }
     DDS_HEADER dds_header = {
         .dwSize = sizeof(DDS_HEADER),
@@ -220,16 +226,19 @@ void tex2dds(const char* tex_path)
     printf("Info: Converting %ux%u TEX file \"%s\" to DDS file \"%s\".\n", tex_header.image_width, tex_header.image_height, tex_path, dds_path);
 
     // the raw dds image data
-    uint8_t* data_buffer = malloc(file_size - sizeof(TEX_HEADER));
-    assert(fread(data_buffer, 1, file_size - sizeof(TEX_HEADER), tex_file) == file_size - sizeof(TEX_HEADER));
+    uint32_t buffer_size = file_size - sizeof(TEX_HEADER);
+    uint8_t* data_buffer = malloc(buffer_size);
+    assert(fread(data_buffer, 1, buffer_size, tex_file) == buffer_size);
+
+    bool success = true;
     if (tex_header.has_mipmaps) {
-        int32_t current_offset = file_size - sizeof(TEX_HEADER);
+        int32_t current_offset = buffer_size;
         printf("Writing %u mipmaps to DDS file...\n", dds_header.dwMipMapCount);
         const uint32_t block_size = get_block_size(tex_header.tex_format);
         const uint32_t bytes_per_block = get_bytes_per_block(tex_header.tex_format);
         for (uint32_t i = 0; i < dds_header.dwMipMapCount; i++) {
-            uint32_t current_image_width = max(tex_header.image_width / (1 << i), 1);
-            uint32_t current_image_height = max(tex_header.image_height / (1 << i), 1);
+            uint32_t current_image_width = max(tex_header.image_width >> i, 1);
+            uint32_t current_image_height = max(tex_header.image_height >> i, 1);
             uint32_t block_width = (current_image_width + block_size - 1) / block_size;
             uint32_t block_height = (current_image_height + block_size - 1) / block_size;
             uint32_t current_image_size = bytes_per_block * block_width * block_height;
@@ -237,37 +246,49 @@ void tex2dds(const char* tex_path)
             current_offset -= current_image_size;
             if (current_offset < 0) {
                 fprintf(stderr, "Error when attempting to write mipmap %u: Not enough data to read mipmap!\n", i);
+                success = false;
                 break;
             }
             fwrite(data_buffer + current_offset, 1, current_image_size, dds_file);
         }
     } else {
-        fwrite(data_buffer, 1, file_size - sizeof(TEX_HEADER), dds_file);
+        fwrite(data_buffer, 1, buffer_size, dds_file);
     }
     free(data_buffer);
 
     fclose(tex_file);
     fclose(dds_file);
+
+    return success;
 }
 
 int main(int argc, char* argv[])
 {
+    bool success = true;
     if (argc < 2) {
         fprintf(stderr, "Error: Provide at least one input file!\n");
-        exit(EXIT_FAILURE);
+        success = false;
     }
 
     for (int i = 1; i < argc; i++) {
         input_path_length = strlen(argv[i]);
         if (input_path_length > 4) {
             if (strcmp(argv[i] + input_path_length - 4, ".dds") == 0) {
-                dds2tex(argv[i]);
+                success = dds2tex(argv[i]) && success;
             } else if (strcmp(argv[i] + input_path_length - 4, ".tex") == 0) {
-                tex2dds(argv[i]);
+                success = tex2dds(argv[i]) && success;
             } else {
                 fprintf(stderr, "Error: \"%s\" is neither a .dds or .tex file!\n", argv[i]);
+                success = false;
                 continue;
             }
         }
+    }
+
+    if (!success) {
+#ifdef _WIN32
+        getc(stdin);
+#endif
+        exit(EXIT_FAILURE);
     }
 }
