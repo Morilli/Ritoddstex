@@ -155,7 +155,7 @@ bool dds2tex(const char* dds_path)
         }
     }
 
-    char tex_path[input_path_length];
+    char tex_path[input_path_length + 1];
     memcpy(tex_path, dds_path, input_path_length);
     memcpy(tex_path + input_path_length - 4, ".tex", 5);
     FILE* tex_file = fopen(tex_path, "wb");
@@ -253,7 +253,7 @@ bool tex2dds(const char* tex_path)
     }
     memcpy(ddspf.dwFourCC, dds_format, 4);
 
-    char dds_path[input_path_length];
+    char dds_path[input_path_length + 1];
     memcpy(dds_path, tex_path, input_path_length);
     memcpy(dds_path + input_path_length - 4, ".dds", 5);
     FILE* dds_file = fopen(dds_path, "wb");
@@ -329,9 +329,9 @@ int main(int argc, char* argv[])
     for (int i = 1; i < argc; i++) {
         input_path_length = strlen(argv[i]);
         if (input_path_length > 4) {
-            if (strcmp(argv[i] + input_path_length - 4, ".dds") == 0) {
+            if (strcasecmp(argv[i] + input_path_length - 4, ".dds") == 0) {
                 success = dds2tex(argv[i]) && success;
-            } else if (strcmp(argv[i] + input_path_length - 4, ".tex") == 0) {
+            } else if (strcasecmp(argv[i] + input_path_length - 4, ".tex") == 0) {
                 success = tex2dds(argv[i]) && success;
             } else {
                 fprintf(stderr, "Error: \"%s\" is neither a .dds or .tex file!\n", argv[i]);
