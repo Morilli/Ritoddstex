@@ -99,15 +99,6 @@ bool dds2tex(const char* dds_path)
     DDS_HEADER dds_header;
     assert(fread(&dds_header, sizeof(DDS_HEADER), 1, dds_file) == 1);
 
-    if (dds_header.dwWidth % 4 != 0 || dds_header.dwHeight % 4 != 0) {
-        if (dds_header.dwWidth % 4 != 0)
-            fprintf(stderr, "Error: Cannot convert to tex when width (%d) isn't divisible by 4!\n", dds_header.dwWidth);
-        if (dds_header.dwHeight % 4 != 0)
-            fprintf(stderr, "Error: Cannot convert to tex when height (%d) isn't divisible by 4!\n", dds_header.dwHeight);
-        fclose(dds_file);
-        return false;
-    }
-
     TEX_HEADER tex_header = {
         .magic = tex_magic,
         .image_width = dds_header.dwWidth,
@@ -153,6 +144,17 @@ bool dds2tex(const char* dds_path)
         fclose(dds_file);
         return false;
     }
+
+    const int block_size = get_block_size(tex_header.tex_format);
+    if (dds_header.dwWidth % block_size != 0 || dds_header.dwHeight % block_size != 0) {
+        if (dds_header.dwWidth % block_size != 0)
+            fprintf(stderr, "Error: Cannot convert to tex when width (%d) isn't divisible by %d!\n", dds_header.dwWidth, block_size);
+        if (dds_header.dwHeight % block_size != 0)
+            fprintf(stderr, "Error: Cannot convert to tex when height (%d) isn't divisible by %d!\n", dds_header.dwHeight, block_size);
+        fclose(dds_file);
+        return false;
+    }
+
     if (dds_header.dwMipMapCount > 1) { // this value may be set to 1, which is equivalent to leaving it at 0 (no mipmaps)
         tex_header.has_mipmaps = true;
         if (dds_header.dwMipMapCount != 32u - __builtin_clz(max(dds_header.dwWidth, dds_header.dwHeight))) {
